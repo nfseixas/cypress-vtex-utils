@@ -1,0 +1,52 @@
+<html>
+  <head>
+    <meta charset='utf-8' />
+    <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1' />
+    <meta name='viewport' content='width=device-width' />
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+
+    <title>Post Data</title>
+  </head>
+  <body>
+    <h1>Post Data</h1>
+    <details>
+      <summary>
+        Text
+      </summary>
+      <pre id="text"></pre>
+    </details>
+    <details>
+      <summary>
+        Blob
+      </summary>
+      <pre id="blob"></pre>
+    </details>
+  </body>
+  <script>
+    const text = document.querySelector('#text');
+    const blob = document.querySelector('#blob');
+    const blobContent = new XMLSerializer().serializeToString(document);
+
+    fetch('/api/echo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'John Doe',
+        email: 'john.doe@example.com',
+        message: 'Hello, world!'
+      })
+    })
+      .then(response => response.json())
+      .then(data => text.innerText = JSON.stringify(data, null, 2))
+      .catch(error => console.error(error));
+
+    fetch('/api/echo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml' },
+      body: new Blob([blobContent])
+    })
+      .then(response => response.text())
+      .then(data => blob.innerText = data)
+      .catch(error => console.error(error));
+  </script>
+</html>

@@ -1,7 +1,6 @@
-import { Har } from 'har-format';
-import { NetworkRequest } from './NetworkRequest';
+import type { Entry, Har } from 'har-format';
 export declare class HarBuilder {
-    private readonly chromeRequests;
-    constructor(chromeRequests: NetworkRequest[]);
-    build(): Promise<Har>;
+    private readonly entries;
+    constructor(entries: Entry[]);
+    build(): Har;
 }

@@ -1,47 +1,53 @@
-import Protocol from 'devtools-protocol';
-import ProtocolMapping from 'devtools-protocol/types/protocol-mapping';
-import { ChromeRemoteInterface, Network } from 'chrome-remote-interface';
-import { Logger } from '../utils';
-import { Header } from 'har-format';
+import { Logger } from '../utils/Logger';
 import { NetworkRequest } from './NetworkRequest';
+import { ExtraInfoBuilder } from './ExtraInfoBuilder';
+import type { NetworkObserverOptions } from './NetworkObserverOptions';
+import type { Observer } from './Observer';
+import type { RequestFilter } from './filters';
+import type { Network, NetworkEvent } from './Network';
+import type Protocol from 'devtools-protocol';
+import type { Header } from 'har-format';
 
-export type ChromeRemoteInterfaceMethod = keyof ProtocolMapping.Events;
-
-export type ChromeRemoteInterfaceEvent = {
-  method: ChromeRemoteInterfaceMethod;
-  params?: ProtocolMapping.Events[ChromeRemoteInterfaceMethod][0];
-};
-
-export class NetworkObserver {
+export class NetworkObserver implements Observer<NetworkRequest> {
   private readonly _entries: Map<Protocol.Network.RequestId, NetworkRequest>;
-  private readonly network: Network;
-  private destination: (chromeEntry: NetworkRequest) => void;
+  private readonly _extraInfoBuilders: Map<
+    Protocol.Network.RequestId,
+    ExtraInfoBuilder
+  >;
+  private destination?: (chromeEntry: NetworkRequest) => unknown;
+
+  get empty(): boolean {
+    return this._entries.size === 0;
+  }
 
   constructor(
-    private readonly chromeRemoteInterface: ChromeRemoteInterface,
+    private readonly options: NetworkObserverOptions,
+    private readonly network: Network,
     private readonly logger: Logger,
-    private readonly options: {
-      stubPath: string;
-    }
+    private readonly requestFilter?: RequestFilter
   ) {
     this._entries = new Map<Protocol.Network.RequestId, NetworkRequest>();
-    const { Network: network } = this.chromeRemoteInterface;
-    this.network = network;
+    this._extraInfoBuilders = new Map<
+      Protocol.Network.RequestId,
+      ExtraInfoBuilder
+    >();
   }
 
   public async subscribe(
-    callback: (chromeEntry: NetworkRequest) => void
+    callback: (chromeEntry: NetworkRequest) => unknown
   ): Promise<void> {
-    this.destination = (entry: NetworkRequest): void => callback(entry);
+    this.destination = callback;
 
-    this.chromeRemoteInterface.on(
-      'event',
-      (event: ChromeRemoteInterfaceEvent) => this.handleEvent(event)
+    await this.network.attachToTargets((event: NetworkEvent): void =>
+      this.handleEvent(event)
     );
+  }
 
-    await this.network.enable();
-    await this.network.setCacheDisabled({ cacheDisabled: true });
-    await this.network.setBypassServiceWorker({ bypass: true });
+  public async unsubscribe(): Promise<void> {
+    await this.network.detachFromTargets();
+    delete this.destination;
+    this._entries.clear();
+    this._extraInfoBuilders.clear();
   }
 
   public signedExchangeReceived(
@@ -84,9 +90,9 @@ export class NetworkObserver {
           requestId,
           loaderId,
           timestamp,
+          frameId,
           type: 'Other',
-          response: redirectResponse,
-          frameId
+          response: redirectResponse
         });
       }
       entry = this._appendRedirect(requestId, timestamp, request.url);
@@ -105,6 +111,8 @@ export class NetworkObserver {
 
     entry.setIssueTime(timestamp, wallTime);
     entry.resourceType = type ?? 'Other';
+
+    this.getExtraInfoBuilder(requestId).addRequest(entry);
 
     this.startRequest(entry);
   }
@@ -131,7 +139,7 @@ export class NetworkObserver {
     response,
     timestamp,
     type
-  }: Protocol.Network.ResponseReceivedEvent): void {
+  }: Omit<Protocol.Network.ResponseReceivedEvent, 'hasExtraInfo'>): void {
     const entry: NetworkRequest | undefined = this._entries.get(requestId);
 
     if (!entry) {
@@ -187,8 +195,8 @@ export class NetworkObserver {
 
     this.finishRequest(entry, timestamp, -1);
 
-    const message: string = errorText || (canceled && 'Canceled');
-    this.logger.err(message);
+    const message = errorText || (canceled && 'Canceled');
+    this.logger.debug(`Failed request: ${requestId}. Reason: ${message}`);
   }
 
   public webSocketCreated({
@@ -196,7 +204,7 @@ export class NetworkObserver {
     requestId,
     url
   }: Protocol.Network.WebSocketCreatedEvent): void {
-    const entry: NetworkRequest | undefined = this.createRequest(
+    const entry: NetworkRequest = this.createRequest(
       requestId,
       '',
       '',
@@ -205,6 +213,20 @@ export class NetworkObserver {
       initiator
     );
     this.startRequest(entry);
+  }
+
+  public eventSourceMessageReceived({
+    requestId,
+    timestamp,
+    eventName,
+    eventId,
+    data
+  }: Protocol.Network.EventSourceMessageReceivedEvent): void {
+    const entry: NetworkRequest | undefined = this._entries.get(requestId);
+    if (!entry) {
+      return;
+    }
+    entry.addEventSourceMessage(timestamp, eventName, eventId, data);
   }
 
   public webSocketWillSendHandshakeRequest({
@@ -314,13 +336,7 @@ export class NetworkObserver {
     requestId,
     headers
   }: Protocol.Network.RequestWillBeSentExtraInfoEvent): void {
-    const entry: NetworkRequest | undefined = this._entries.get(requestId);
-
-    if (!entry) {
-      return;
-    }
-
-    entry.addExtraRequestInfo({
+    this.getExtraInfoBuilder(requestId).addRequestExtraInfo({
       requestHeaders: this.headersMapToHeadersArray(headers)
     });
   }
@@ -330,28 +346,39 @@ export class NetworkObserver {
     headers,
     headersText
   }: Protocol.Network.ResponseReceivedExtraInfoEvent): void {
-    const entry: NetworkRequest | undefined = this._entries.get(requestId);
-
-    if (!entry) {
-      return;
-    }
-
-    entry.addExtraResponseInfo({
+    this.getExtraInfoBuilder(requestId).addResponseExtraInfo({
       responseHeaders: this.headersMapToHeadersArray(headers),
       responseHeadersText: headersText
     });
   }
 
+  private getExtraInfoBuilder(
+    requestId: Protocol.Network.RequestId
+  ): ExtraInfoBuilder {
+    if (!this._extraInfoBuilders.has(requestId)) {
+      this._extraInfoBuilders.set(
+        requestId,
+        new ExtraInfoBuilder((): void => {
+          this._extraInfoBuilders.delete(requestId);
+        })
+      );
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    return this._extraInfoBuilders.get(requestId)!;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private _appendRedirect(
     requestId: Protocol.Network.RequestId,
     time: Protocol.Network.MonotonicTime,
     redirectURL: string
   ): NetworkRequest {
-    const originalNetworkRequest:
-      | NetworkRequest
-      | undefined = this._entries.get(requestId);
+    const originalNetworkRequest: NetworkRequest = this._entries.get(
+      requestId
+    ) as NetworkRequest;
 
-    let redirectCount: number = 0;
+    let redirectCount = 0;
     let redirect: NetworkRequest | undefined =
       originalNetworkRequest.redirectSource;
 
@@ -397,8 +424,24 @@ export class NetworkObserver {
       }
     }
 
-    this._entries.delete(networkRequest.requestId);
-    this.destination(networkRequest);
+    this.loadContent(networkRequest);
+
+    this.getExtraInfoBuilder(networkRequest.requestId).finished();
+
+    if (!this.shouldExcludeRequest(networkRequest)) {
+      networkRequest
+        .waitForCompletion()
+        .then(() => this.destination?.(networkRequest))
+        .finally(() => this._entries.delete(networkRequest.requestId));
+    }
+  }
+
+  private loadContent(networkRequest: NetworkRequest): void {
+    if (networkRequest.mimeType && this.options.content) {
+      networkRequest.setContentData(
+        this.network.getResponseBody(networkRequest.requestId)
+      );
+    }
   }
 
   private startRequest(networkRequest: NetworkRequest): void {
@@ -414,10 +457,27 @@ export class NetworkObserver {
       request.headers
     );
     chromeRequest.setRequestFormData(
-      !!request.hasPostData,
-      request.postData ?? null
+      request.hasPostData
+        ? this.getRequestPostData(chromeRequest, request)
+        : Promise.resolve(undefined)
     );
     chromeRequest.initialPriority = request.initialPriority;
+  }
+
+  private getRequestPostData(
+    request: NetworkRequest,
+    rawRequest: Protocol.Network.Request
+  ): Promise<string | undefined> {
+    return rawRequest.postData !== undefined
+      ? Promise.resolve(rawRequest.postData)
+      : this.network
+          .getRequestBody(request.requestId)
+          .then(
+            ({
+              postData
+            }: Protocol.Network.GetRequestPostDataResponse): string => postData
+          )
+          .catch(() => undefined);
   }
 
   private createRequest(
@@ -426,31 +486,25 @@ export class NetworkObserver {
     loaderId: Protocol.Network.LoaderId,
     url: string,
     documentURL: string,
-    initiator: Protocol.Network.Initiator
+    initiator?: Protocol.Network.Initiator
   ): NetworkRequest {
     return new NetworkRequest(
       requestId,
-      this.stripStubPathFromUrl(url),
+      url,
       documentURL,
-      frameId,
       loaderId,
       initiator,
-      this.network
+      frameId
     );
   }
 
-  private stripStubPathFromUrl(url: string): string {
-    const indexOfStubPath: number = url.indexOf(this.options.stubPath);
-
-    return indexOfStubPath !== -1 ? url.substring(indexOfStubPath) : url;
-  }
-
+  // eslint-disable-next-line complexity
   private updateNetworkRequestWithResponse(
     networkRequest: NetworkRequest,
     response: Protocol.Network.Response
   ): void {
     if (response.url && networkRequest.url !== response.url) {
-      networkRequest.setUrl(this.stripStubPathFromUrl(response.url));
+      networkRequest.url = response.url;
     }
     networkRequest.mimeType = response.mimeType;
     networkRequest.statusCode = response.status;
@@ -483,7 +537,9 @@ export class NetworkObserver {
       );
     }
 
-    networkRequest.timing = response.timing;
+    if (response.timing) {
+      networkRequest.timing = response.timing;
+    }
 
     networkRequest.protocol = response.protocol ?? '';
   }
@@ -491,21 +547,29 @@ export class NetworkObserver {
   private headersMapToHeadersArray(
     headersMap: Protocol.Network.Headers
   ): Header[] {
-    return Object.keys(headersMap).reduce((acc: Header[], name: string) => {
-      const values: string[] = headersMap[name].split('\n');
+    return Object.keys(headersMap).reduce(
+      (acc: Header[], name: string): Header[] => {
+        const values: string[] = headersMap[name].split('\n');
 
-      acc.push(...values.map((value: string) => ({ name, value })));
+        acc.push(...values.map((value: string): Header => ({ name, value })));
 
-      return acc;
-    }, []);
+        return acc;
+      },
+      []
+    );
   }
 
-  private handleEvent({ method, params }: ChromeRemoteInterfaceEvent): void {
-    const methodName: string = method.substring(method.indexOf('.') + 1);
-    const handler: Function | undefined = this[methodName];
+  private shouldExcludeRequest(request: NetworkRequest): boolean {
+    return this.requestFilter?.wouldApply(this.options)
+      ? !this.requestFilter.apply(request, this.options)
+      : false;
+  }
 
-    if (handler) {
-      handler.call(this, params);
+  private handleEvent({ method, params, sessionId }: NetworkEvent): void {
+    const methodName = method.substring(method.indexOf('.') + 1);
+
+    if (typeof this[methodName] === 'function') {
+      this[methodName](params, sessionId);
     }
   }
 }

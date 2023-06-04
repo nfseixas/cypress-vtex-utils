@@ -1,5 +1,7 @@
-import { NetworkRequest, WebSocket } from './NetworkRequest';
-import {
+import { NetworkRequest } from './NetworkRequest';
+import { NetworkCookie } from './NetworkCookie';
+import type { ContentData } from './NetworkRequest';
+import type {
   Content,
   Cookie,
   Entry,
@@ -9,15 +11,6 @@ import {
   Response,
   Timings
 } from 'har-format';
-import Protocol from 'devtools-protocol';
-import { NetworkCookie } from './NetworkCookie';
-
-export interface WsarWebSocketFrame {
-  request?: string;
-  response?: string;
-  opcode: number;
-  mask: boolean;
-}
 
 export class EntryBuilder {
   constructor(private readonly request: NetworkRequest) {}
@@ -33,8 +26,9 @@ export class EntryBuilder {
 
     const timings: Timings = this.buildTimings();
 
-    const time: any = Object.values(timings).reduce(
-      (acc: number, t: number) => (acc += Math.max(t, 0))
+    const time: number = Object.values(timings).reduce(
+      (acc: number, t: number): number => acc + Math.max(t, 0),
+      0
     );
 
     const entry: any = {
@@ -42,14 +36,16 @@ export class EntryBuilder {
         this.request.getWallTime(this.request.issueTime) * 1000
       ).toJSON(),
       time,
+      timings,
       request: await this.buildRequest(),
       response: await this.buildResponse(),
       cache: {},
-      timings,
-      serverIPAddress: serverIPAddress.replace(/\[\]/g, ''),
+      // ADHOC: We should remove square brackets for IPv6 address (https://tools.ietf.org/html/rfc2373#section-2.2).
+      serverIPAddress: serverIPAddress.replace(/[[\]]/g, ''),
       _priority: this.request.priority,
       _resourceType: this.request.resourceType,
-      _websocket: this.buildWebSockets(this.request.frames ?? [])
+      _webSocketMessages: this.request.frames ?? [],
+      _eventSourceMessages: this.request.eventSourceMessages ?? []
     };
 
     if (this.request.connectionId !== '0') {
@@ -73,10 +69,10 @@ export class EntryBuilder {
 
   private getResponseCompression(): number | undefined {
     if (this.request.statusCode === 304 || this.request.statusCode === 206) {
-      return;
+      return undefined;
     }
     if (!this.request.responseHeadersText) {
-      return;
+      return undefined;
     }
 
     return this.request.resourceSize - this.getResponseBodySize();
@@ -98,7 +94,7 @@ export class EntryBuilder {
       bodySize: await this.requestBodySize()
     };
 
-    const postData: PostData = await this.buildPostData();
+    const postData: PostData | undefined = await this.buildPostData();
 
     if (postData) {
       res.postData = postData;
@@ -123,16 +119,21 @@ export class EntryBuilder {
   }
 
   private async buildContent(): Promise<Content> {
-    return {
-      size: this.request.resourceSize,
-      mimeType: this.request.mimeType || 'x-unknown',
-      ...(await this.request.contentData()),
-      compression: this.getResponseCompression() ?? undefined
-    };
+    const data: ContentData | undefined = await this.request.contentData();
+
+    return Object.assign(
+      {
+        size: this.request.resourceSize,
+        mimeType: this.request.mimeType || 'x-unknown',
+        compression: this.getResponseCompression() ?? undefined
+      },
+      data
+    );
   }
 
+  // eslint-disable-next-line complexity
   private buildTimings(): Timings {
-    const timing: Protocol.Network.ResourceTiming = this.request.timing;
+    const timing = this.request.timing;
     const issueTime: number = this.request.issueTime;
     const startTime: number = this.request.startTime;
 
@@ -218,16 +219,18 @@ export class EntryBuilder {
   }
 
   private leastNonNegative(values: number[]): number {
-    const value: number = values.find((item: number) => item >= 0);
+    const value: number | undefined = values.find(
+      (item: number): boolean => item >= 0
+    );
 
     return value ?? -1;
   }
 
-  private async buildPostData(): Promise<PostData> {
-    const postData: string = await this.request.requestFormData();
+  private async buildPostData(): Promise<PostData | undefined> {
+    const postData: string | undefined = await this.request.requestFormData();
 
     if (!postData) {
-      return;
+      return undefined;
     }
 
     const res: Partial<PostData> = {
@@ -238,7 +241,7 @@ export class EntryBuilder {
     const formParameters: Param[] = await this.request.formParameters();
 
     if (formParameters) {
-      res.params = [...formParameters];
+      res.params = [...formParameters] as never;
     }
 
     return res as PostData;
@@ -248,20 +251,8 @@ export class EntryBuilder {
     return url.split('#', 2)[0];
   }
 
-  private buildWebSockets(frames: WebSocket[]): WsarWebSocketFrame[] {
-    return frames.map(this.buildSocket.bind(this));
-  }
-
   private buildCookies(cookies: NetworkCookie[]): Cookie[] {
     return cookies.map(this.buildCookie.bind(this));
-  }
-
-  private buildSocket(frame: WebSocket): WsarWebSocketFrame {
-    return ({
-      [frame.type]: frame.data,
-      opcode: frame.opCode,
-      mask: frame.mask
-    } as unknown) as WsarWebSocketFrame;
   }
 
   private buildCookie(cookie: NetworkCookie): Cookie {

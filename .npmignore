@@ -1,12 +1,9 @@
-node_modules
-src
-example
-tmp
-.github
-**/*.spec.ts
-.idea
-.eslintrc
-.eslintignore
-.prettierignore
-.prettierrc
-.releaserc
+# Add files here to ignore them from npm publishing
+
+/node_modules
+/src
+/coverage
+/example
+/typings
+/.idea
+**/.*

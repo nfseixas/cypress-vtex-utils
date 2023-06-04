@@ -4,8 +4,7 @@ export declare class CookieParser {
     private _originalInputLength?;
     private _lastCookie?;
     private _lastCookiePosition;
-    private _cookies;
-    get cookies(): NetworkCookie[];
+    private _cookies?;
     parseCookie(cookieHeader: string): NetworkCookie[] | undefined;
     parseSetCookie(setCookieHeader: string): NetworkCookie[] | undefined;
     private _initialize;

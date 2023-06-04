@@ -1,11 +1,5 @@
 import { NetworkRequest } from './NetworkRequest';
-import { Entry } from 'har-format';
-export interface WsarWebSocketFrame {
-    request?: string;
-    response?: string;
-    opcode: number;
-    mask: boolean;
-}
+import type { Entry } from 'har-format';
 export declare class EntryBuilder {
     private readonly request;
     constructor(request: NetworkRequest);
@@ -20,9 +14,7 @@ export declare class EntryBuilder {
     private leastNonNegative;
     private buildPostData;
     private buildRequestURL;
-    private buildWebSockets;
     private buildCookies;
-    private buildSocket;
     private buildCookie;
     private requestBodySize;
 }

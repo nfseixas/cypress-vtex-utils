@@ -1,0 +1,33 @@
+<html>
+  <head>
+    <meta charset='utf-8' />
+    <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1' />
+    <meta name='viewport' content='width=device-width' />
+    <link rel='icon' href='data:;base64,iVBORw0KGgo=' />
+
+    <title>Workers</title>
+
+    <link rel='stylesheet' href='/worker.css' />
+  </head>
+  <body>
+    <h1>Workers</h1>
+    <div class='controls' tabindex='0'>
+      <form>
+        <div>
+          <label for='number1'>Number 1: </label>
+          <input type='text' id='number1' value='0' />
+        </div>
+        <div>
+          <label for='number2'>Number 2: </label>
+          <input type='text' id='number2' value='0' />
+        </div>
+        <button id="sum-web-worker">Sum (Web worker)</button>
+        <button id="avg-web-worker">Avg (Web worker)</button>
+        <button id="sum-shared-worker">Sum (Shared worker)</button>
+      </form>
+
+      <p class='result'>Result: 0</p>
+    </div>
+  </body>
+  <script src='/worker.js' type='module'></script>
+</html>

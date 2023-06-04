@@ -1,9 +1,9 @@
-import Protocol from 'devtools-protocol';
-import { parse as parseUrl, UrlWithStringQuery } from 'url';
-import { Header, Param, QueryString } from 'har-format';
-import { Network } from 'chrome-remote-interface';
 import { CookieParser } from './CookieParser';
 import { NetworkCookie } from './NetworkCookie';
+import { StringUtils } from '../utils/StringUtils';
+import type { RequestExtraInfo, ResponseExtraInfo } from './ExtraInfoBuilder';
+import type { Header, Param, QueryString } from 'har-format';
+import type Protocol from 'devtools-protocol';
 
 export interface ContentData {
   error?: string;
@@ -12,21 +12,28 @@ export interface ContentData {
 }
 
 export enum WebSocketFrameType {
-  Request = 'request',
-  Response = 'response',
-  Error = 'error'
+  REQUEST = 'request',
+  RESPONSE = 'response',
+  ERROR = 'error'
 }
 
 export interface WebSocket {
   type: WebSocketFrameType;
   data: string;
   time: Protocol.Network.MonotonicTime;
-  opCode: number;
+  opcode: number;
   mask: boolean;
 }
 
+export interface EventSourceMessage {
+  time: number;
+  eventName: string;
+  eventId: string;
+  data: string;
+}
+
 export class NetworkRequest {
-  private _contentData?: ContentData;
+  private _contentData?: Promise<ContentData>;
   private _wallIssueTime: Protocol.Network.TimeSinceEpoch = -1;
   private _requestHeaderValues: Map<string, string> = new Map<string, string>();
   private _responseHeaderValues: Map<string, string> = new Map<
@@ -35,16 +42,19 @@ export class NetworkRequest {
   >();
   private _parsedQueryParameters?: QueryString[];
   private _currentPriority?: Protocol.Network.ResourcePriority;
-  private _requestFormDataPromise: Promise<
-    string | undefined
-  > = Promise.resolve(undefined);
+  private _requestFormData: Promise<string | undefined> =
+    Promise.resolve(undefined);
   private _formParametersPromise?: Promise<Param[]>;
 
-  // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
-  // @ts-ignore
   private _signedExchangeInfo?: Protocol.Network.SignedExchangeInfo;
 
-  set signedExchangeInfo(info: Protocol.Network.SignedExchangeInfo) {
+  // TODO: use to finalize a response in the `requestWillBeSent` event handler or
+  //  update `transferSize` for the chain of redirects
+  get signedExchangeInfo() {
+    return this._signedExchangeInfo;
+  }
+
+  set signedExchangeInfo(info) {
     this._signedExchangeInfo = info;
   }
 
@@ -68,9 +78,9 @@ export class NetworkRequest {
     this._hasExtraRequestInfo = value;
   }
 
-  private _connectionId?: string = '0';
+  private _connectionId: string = '0';
 
-  get connectionId(): string | undefined {
+  get connectionId() {
     return this._connectionId;
   }
 
@@ -118,16 +128,27 @@ export class NetworkRequest {
     this._statusText = value ?? '';
   }
 
-  private _parsedURL?: UrlWithStringQuery;
+  private _parsedURL!: URL;
 
-  get parsedURL(): UrlWithStringQuery {
+  get parsedURL() {
     return this._parsedURL;
   }
 
-  private _url?: string;
+  private _url!: string;
 
-  get url(): string | undefined {
+  get url(): string {
     return this._url;
+  }
+
+  set url(value: string) {
+    if (this._url === value) {
+      return;
+    }
+
+    this._url = value;
+    this._parsedURL = new URL(value);
+    delete this._queryString;
+    delete this._parsedQueryParameters;
   }
 
   private _remoteAddress: string = '';
@@ -154,7 +175,7 @@ export class NetworkRequest {
     return this._endTime || -1;
   }
 
-  set endTime(x) {
+  set endTime(x: number) {
     if (this.timing && this.timing.requestTime) {
       this._endTime = Math.max(x, this.responseReceivedTime);
     } else {
@@ -197,11 +218,11 @@ export class NetworkRequest {
 
   private _timing?: Protocol.Network.ResourceTiming;
 
-  get timing(): Protocol.Network.ResourceTiming | undefined {
+  get timing() {
     return this._timing;
   }
 
-  set timing(timingInfo: Protocol.Network.ResourceTiming) {
+  set timing(timingInfo) {
     if (!timingInfo) {
       return;
     }
@@ -227,11 +248,11 @@ export class NetworkRequest {
 
   private _mimeType?: string;
 
-  get mimeType(): string | undefined {
+  get mimeType() {
     return this._mimeType;
   }
 
-  set mimeType(value: string) {
+  set mimeType(value) {
     this._mimeType = value;
   }
 
@@ -247,11 +268,11 @@ export class NetworkRequest {
 
   private _redirectSource?: NetworkRequest;
 
-  get redirectSource(): NetworkRequest | undefined {
+  get redirectSource() {
     return this._redirectSource;
   }
 
-  set redirectSource(originatingRequest: NetworkRequest) {
+  set redirectSource(originatingRequest) {
     this._redirectSource = originatingRequest;
   }
 
@@ -272,18 +293,21 @@ export class NetworkRequest {
   get requestCookies(): NetworkCookie[] | undefined {
     if (!this._requestCookies) {
       const cookie = this.requestHeaderValue('Cookie');
-      this._requestCookies = new CookieParser().parseCookie(cookie);
+      this._requestCookies = cookie
+        ? new CookieParser().parseCookie(cookie)
+        : undefined;
     }
 
     return this._requestCookies;
   }
 
   get contentLength(): number {
-    const contentLength: string | undefined = this.requestHeaderValue(
-      'Content-Length'
-    );
+    const contentLength: string | undefined =
+      this.requestHeaderValue('Content-Length');
 
-    return isNaN(+contentLength) ? 0 : parseInt(contentLength, 10);
+    return contentLength == null || isNaN(+contentLength)
+      ? 0
+      : parseInt(contentLength, 10);
   }
 
   private _requestHeadersText: string = '';
@@ -333,7 +357,9 @@ export class NetworkRequest {
   get responseCookies(): NetworkCookie[] | undefined {
     if (!this._responseCookies) {
       const cookie = this.responseHeaderValue('Set-Cookie');
-      this._requestCookies = new CookieParser().parseSetCookie(cookie);
+      this._responseCookies = cookie
+        ? new CookieParser().parseSetCookie(cookie)
+        : undefined;
     }
 
     return this._responseCookies;
@@ -341,17 +367,17 @@ export class NetworkRequest {
 
   private _queryString?: string;
 
-  get queryString(): string {
-    if (this._queryString !== undefined) {
+  get queryString() {
+    if (this._queryString || !this.url) {
       return this._queryString;
     }
 
-    let queryString: string = null;
-    const questionMarkPosition: number = this.url.indexOf('?');
+    let queryString: string | undefined;
+    const questionMarkPosition = this.url.indexOf('?');
 
     if (questionMarkPosition !== -1) {
       queryString = this.url.substring(questionMarkPosition + 1);
-      const hashSignPosition: number = queryString.indexOf('#');
+      const hashSignPosition = queryString.indexOf('#');
 
       if (hashSignPosition !== -1) {
         queryString = queryString.substring(0, hashSignPosition);
@@ -365,12 +391,18 @@ export class NetworkRequest {
 
   private _initialPriority?: Protocol.Network.ResourcePriority;
 
-  get initialPriority(): Protocol.Network.ResourcePriority | undefined {
+  get initialPriority() {
     return this._initialPriority;
   }
 
-  set initialPriority(priority: Protocol.Network.ResourcePriority) {
+  set initialPriority(priority) {
     this._initialPriority = priority;
+  }
+
+  private _eventSourceMessages: EventSourceMessage[] = [];
+
+  get eventSourceMessages(): EventSourceMessage[] {
+    return this._eventSourceMessages;
   }
 
   private _frames: WebSocket[] = [];
@@ -415,80 +447,43 @@ export class NetworkRequest {
       return this._parsedQueryParameters;
     }
 
-    if (!this.queryString) {
-      return null;
+    if (this.queryString) {
+      this._parsedQueryParameters = this.parseParameters(this.queryString);
     }
-
-    this._parsedQueryParameters = this.parseParameters(this.queryString);
 
     return this._parsedQueryParameters;
   }
 
-  get requestContentType(): string {
+  get requestContentType(): string | undefined {
     return this.requestHeaderValue('Content-Type');
   }
 
   get priority(): Protocol.Network.ResourcePriority | undefined {
-    return this._currentPriority || this._initialPriority || null;
+    return this._currentPriority ?? this.initialPriority ?? undefined;
   }
 
-  set priority(priority: Protocol.Network.ResourcePriority) {
+  set priority(priority) {
     this._currentPriority = priority;
   }
 
   constructor(
+    // eslint-disable-next-line @typescript-eslint/naming-convention
     private _requestId: Protocol.Network.RequestId,
     url: string,
     public readonly documentURL: string,
-    public readonly frameId: Protocol.Page.FrameId = '',
     public readonly loaderId: Protocol.Network.LoaderId,
-    public readonly initiator: Protocol.Network.Initiator,
-    private readonly network: Network
+    public readonly initiator?: Protocol.Network.Initiator,
+    public readonly frameId: Protocol.Page.FrameId = ''
   ) {
-    this.setUrl(url);
+    this.url = url;
   }
 
-  private static escapeCharacters(
-    str: string,
-    chars: string = '^[]{}()\\\\.$*+?|'
-  ): string {
-    let foundChar = false;
-
-    const length = chars.length;
-
-    for (let i = 0; i < length; ++i) {
-      if (str.indexOf(chars.charAt(i)) !== -1) {
-        foundChar = true;
-        break;
-      }
-    }
-
-    if (!foundChar) {
-      return str;
-    }
-
-    let result = '';
-
-    for (let j = 0; j < str.length; ++j) {
-      if (chars.indexOf(str.charAt(j)) !== -1) {
-        result += '\\';
-      }
-
-      result += str.charAt(j);
-    }
-
-    return result;
+  public async waitForCompletion(): Promise<void> {
+    await Promise.all([this._contentData, this._formParametersPromise]);
   }
 
-  public setUrl(value: string): void {
-    if (this._url === value) {
-      return;
-    }
-
-    this._url = value;
-    this._parsedURL = parseUrl(value);
-    delete this._queryString;
-    delete this._parsedQueryParameters;
+  public isBlob(): boolean {
+    return this._url.startsWith('blob:');
   }
 
   public setRemoteAddress(ip: string, port: number): void {
@@ -509,61 +504,13 @@ export class NetworkRequest {
   }
 
   public requestFormData(): Promise<string | undefined> {
-    try {
-      // eslint-disable-next-line @typescript-eslint/tslint/config
-      if (!this._requestFormDataPromise) {
-        this._requestFormDataPromise = this.network
-          .getRequestPostData({ requestId: this.requestId })
-          .then(
-            ({ postData }: Protocol.Network.GetRequestPostDataResponse) =>
-              postData
-          );
-      }
-
-      return this._requestFormDataPromise;
-    } catch (e) {}
+    return this._requestFormData;
   }
 
-  public setRequestFormData(hasData: boolean, data: string): void {
-    this._requestFormDataPromise =
-      hasData && data === null ? null : Promise.resolve(data);
-    this._formParametersPromise = null;
-  }
-
-  public async _parseFormParameters(): Promise<Param[]> {
-    if (
-      this.requestContentType?.match(
-        /^application\/x-www-form-urlencoded\s*(;.*)?$/i
-      )
-    ) {
-      const formUrlencoded: string = await this.requestFormData();
-
-      if (!formUrlencoded) {
-        return;
-      }
-
-      return this.parseParameters(formUrlencoded);
-    }
-
-    const multipartDetails: RegExpMatchArray = this.requestContentType.match(
-      /^multipart\/form-data\s*;\s*boundary\s*=\s*(\S+)\s*$/
-    );
-
-    if (!multipartDetails) {
-      return;
-    }
-
-    const boundary: string = multipartDetails[1];
-    if (!boundary) {
-      return;
-    }
-
-    const formData: string = await this.requestFormData();
-    if (!formData) {
-      return;
-    }
-
-    return this.parseMultipartFormDataParameters(formData, boundary);
+  public setRequestFormData(data: string | Promise<string | undefined>): void {
+    this._requestFormData =
+      typeof data === 'string' ? Promise.resolve(data) : data;
+    this._formParametersPromise = undefined;
   }
 
   public getWallTime(monotonicTime: Protocol.Network.MonotonicTime): number {
@@ -573,9 +520,8 @@ export class NetworkRequest {
   }
 
   public formParameters(): Promise<Param[]> {
-    // eslint-disable-next-line @typescript-eslint/tslint/config
     if (!this._formParametersPromise) {
-      this._formParametersPromise = this._parseFormParameters();
+      this._formParametersPromise = this.parseFormParameters();
     }
 
     return this._formParametersPromise;
@@ -584,9 +530,8 @@ export class NetworkRequest {
   public responseHttpVersion(): string {
     if (this._responseHeadersText) {
       const firstLine: string = this._responseHeadersText.split(/\r\n/)[0];
-      const match: RegExpMatchArray | undefined = firstLine.match(
-        /^(HTTP\/\d+\.\d+)/
-      );
+      const match: RegExpMatchArray | null =
+        firstLine.match(/^(HTTP\/\d+\.\d+)/);
 
       return match ? match[1] : 'HTTP/0.9';
     }
@@ -602,29 +547,31 @@ export class NetworkRequest {
     return this.getFilteredProtocolName();
   }
 
-  public async contentData(): Promise<ContentData> {
-    if (this._contentData) {
-      return this._contentData;
-    }
-
+  public setContentData(
+    data: Promise<Protocol.Network.GetResponseBodyResponse>
+  ): void {
     if (this.resourceType === 'WebSocket') {
-      return {
+      this._contentData = Promise.resolve({
         error: 'Content for WebSockets is currently not supported'
-      };
+      });
+
+      return;
     }
 
-    try {
-      const response: Protocol.Network.GetResponseBodyResponse = await this.network.getResponseBody(
-        { requestId: this.requestId }
-      );
-      this._contentData = {
-        text: response.body,
-        encoding: response.base64Encoded ? 'base64' : undefined
-      };
-    } catch (e) {
-      this._contentData = { error: e.message };
-    }
+    this._contentData = data
+      .then(
+        ({
+          body: text,
+          base64Encoded
+        }: Protocol.Network.GetResponseBodyResponse): ContentData => ({
+          text,
+          encoding: base64Encoded ? 'base64' : undefined
+        })
+      )
+      .catch((e: Error): ContentData => ({ error: e.message }));
+  }
 
+  public contentData(): Promise<ContentData> | undefined {
     return this._contentData;
   }
 
@@ -633,10 +580,10 @@ export class NetworkRequest {
     time: Protocol.Network.MonotonicTime
   ): void {
     this.addFrame({
-      type: WebSocketFrameType.Error,
-      data: errorMessage,
       time,
-      opCode: -1,
+      type: WebSocketFrameType.ERROR,
+      data: errorMessage,
+      opcode: -1,
       mask: false
     });
   }
@@ -647,52 +594,61 @@ export class NetworkRequest {
     sent: boolean
   ): void {
     const type: WebSocketFrameType = sent
-      ? WebSocketFrameType.Request
-      : WebSocketFrameType.Response;
+      ? WebSocketFrameType.REQUEST
+      : WebSocketFrameType.RESPONSE;
 
     this.addFrame({
       type,
-      data: response.payloadData,
       time,
-      opCode: response.opcode,
+      data: response.payloadData,
+      opcode: response.opcode,
       mask: response.mask
     });
+  }
+
+  public addEventSourceMessage(
+    time: number,
+    eventName: string,
+    eventId: string,
+    data: string
+  ) {
+    const message = { time, eventName, eventId, data };
+    this._eventSourceMessages.push(message);
   }
 
   public markAsRedirect(redirectCount: number): void {
     this._requestId = `${this.requestId}:redirected.${redirectCount}`;
   }
 
-  public addExtraRequestInfo(extraRequestInfo: {
-    requestHeaders: Header[];
-  }): void {
+  public addExtraRequestInfo(extraRequestInfo: RequestExtraInfo): void {
     this.requestHeaders = extraRequestInfo.requestHeaders;
     this._hasExtraRequestInfo = true;
     this.requestHeadersText = '';
   }
 
-  public addExtraResponseInfo(extraResponseInfo: {
-    responseHeaders: Header[];
-    responseHeadersText: string;
-  }): void {
+  public addExtraResponseInfo(extraResponseInfo: ResponseExtraInfo): void {
     this.responseHeaders = extraResponseInfo.responseHeaders;
 
     if (extraResponseInfo.responseHeadersText) {
       this.responseHeadersText = extraResponseInfo.responseHeadersText;
-    } else {
-      let requestHeadersText: string = `${this._requestMethod} ${this.parsedURL.path}`;
 
-      if (this.parsedURL.query) {
-        requestHeadersText += `?${this.parsedURL.query}`;
+      if (this.requestHeadersText) {
+        let requestHeadersText = `${this._requestMethod} ${this.parsedURL.pathname}`;
+
+        // eslint-disable-next-line max-depth
+        if (this.parsedURL.search) {
+          requestHeadersText += this.parsedURL.search;
+        }
+
+        requestHeadersText += ` HTTP/1.1\r\n`;
+
+        // eslint-disable-next-line max-depth
+        for (const { name, value } of this.requestHeaders) {
+          requestHeadersText += `${name}: ${value}\r\n`;
+        }
+
+        this.requestHeadersText = requestHeadersText;
       }
-
-      requestHeadersText += ` HTTP/1.1\r\n`;
-
-      for (const { name, value } of this.requestHeaders) {
-        requestHeadersText += `${name}: ${value}\r\n`;
-      }
-
-      this.requestHeadersText = requestHeadersText;
     }
 
     this._hasExtraResponseInfo = true;
@@ -700,21 +656,55 @@ export class NetworkRequest {
 
   public responseHeaderValue(headerName: string): string | undefined {
     if (!this._responseHeaderValues.has(headerName)) {
-      this._responseHeaderValues.set(
-        headerName,
-        this.computeHeaderValue(this.responseHeaders, headerName)
+      const headerValue = this.computeHeaderValue(
+        this.responseHeaders,
+        headerName
       );
+      headerValue && this._responseHeaderValues.set(headerName, headerValue);
     }
 
     return this._responseHeaderValues.get(headerName);
+  }
+
+  private async parseFormParameters(): Promise<Param[]> {
+    if (
+      this.requestContentType?.match(
+        /^application\/x-www-form-urlencoded\s*(;.*)?$/i
+      )
+    ) {
+      const formUrlencoded = await this.requestFormData();
+
+      if (!formUrlencoded) {
+        return [];
+      }
+
+      return this.parseParameters(formUrlencoded);
+    }
+
+    const multipartDetails = this.requestContentType?.match(
+      /^multipart\/form-data\s*;\s*boundary\s*=\s*(\S+)\s*$/
+    );
+
+    if (!multipartDetails) {
+      return [];
+    }
+
+    const boundary = multipartDetails[1];
+    const formData = await this.requestFormData();
+
+    if (!boundary || !formData) {
+      return [];
+    }
+
+    return this.parseMultipartFormDataParameters(formData, boundary);
   }
 
   private parseMultipartFormDataParameters(
     data: string,
     boundary: string
   ): Param[] {
-    const sanitizedBoundary: string = NetworkRequest.escapeCharacters(boundary);
-    const keyValuePattern: RegExp = new RegExp(
+    const sanitizedBoundary: string = StringUtils.escapeCharacters(boundary);
+    const keyValuePattern = new RegExp(
       // Header with an optional file name.
       '^\\r\\ncontent-disposition\\s*:\\s*form-data\\s*;\\s*name="([^"]*)"(?:\\s*;\\s*filename="([^"]*)")?' +
         // Optional secondary header with the content type.
@@ -732,14 +722,15 @@ export class NetworkRequest {
       new RegExp(`--${sanitizedBoundary}(?:--\s*$)?`, 'g')
     );
 
-    return fields.reduce((result: Param[], field: string) => {
-      const [match, name, value] = field.match(keyValuePattern) || [];
+    return fields.reduce((result: Param[], field: string): Param[] => {
+      const [match, name, fileName, contentType, value]: RegExpMatchArray =
+        field.match(keyValuePattern) ?? [];
 
       if (!match) {
         return result;
       }
 
-      result.push({ name, value });
+      result.push({ name, value, fileName, contentType });
 
       return result;
     }, []);
@@ -751,10 +742,11 @@ export class NetworkRequest {
 
   private requestHeaderValue(headerName: string): string | undefined {
     if (!this._requestHeaderValues.has(headerName)) {
-      this._requestHeaderValues.set(
-        headerName,
-        this.computeHeaderValue(this.requestHeaders, headerName)
+      const headerValue = this.computeHeaderValue(
+        this.requestHeaders,
+        headerName
       );
+      headerValue && this._requestHeaderValues.set(headerName, headerValue);
     }
 
     return this._requestHeaderValues.get(headerName);
@@ -771,7 +763,7 @@ export class NetworkRequest {
   }
 
   private parseParameters(queryString: string): QueryString[] {
-    return queryString.split('&').map((pair: string) => {
+    return queryString.split('&').map((pair: string): QueryString => {
       const position: number = pair.indexOf('=');
       if (position === -1) {
         return { name: pair, value: '' };
@@ -791,8 +783,8 @@ export class NetworkRequest {
     headerName = headerName.toLowerCase();
 
     const values: string[] = headers
-      .filter(({ name }: Header) => name.toLowerCase() === headerName)
-      .map(({ value }) => value);
+      .filter(({ name }: Header): boolean => name.toLowerCase() === headerName)
+      .map(({ value }: Header): string => value);
 
     if (!values.length) {
       return undefined;

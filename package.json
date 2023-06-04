@@ -1,49 +1,108 @@
 {
   "name": "cypress-vtex-utils",
-  "version": "0.0.0",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/vtex-gocommerce/cypress-vtex-utils.git"
-  },
+  "version": "1.0.0",
+  "private": false,
+  "description": "The Cypress plugin for generating HTTP Archive (HAR) and Console files is a tool that allows developers and QA engineers to capture detailed information about network requests made during the execution of Cypress tests.",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
-  "scripts": {
-    "build": "tsc",
-    "prepare": "npm run build"
+  "files": [
+    "dist",
+    "commands.js",
+    "commands.js.map"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
   },
-
-  "homepage": "https://github.com/vtex-gocommerce/cypress-vtex-utils#readme",
+  "keywords": [
+    "cypress",
+    "har",
+    "electron",
+    "cypress-plugin",
+    "chrome",
+    "http-archive",
+    "testing",
+    "qa",
+    "automation",
+    "typescript",
+    "chromium",
+    "qatools"
+  ],
+  "scripts": {
+    "semantic-release": "semantic-release",
+    "lint": "eslint -c .eslintrc.js 'src/**/*.ts'",
+    "format": "prettier --check 'src/**/*.ts'",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "start": "node -r ts-node/register cypress/app --port 8080",
+    "e2e": "cypress run --browser chrome --headless",
+    "build": "webpack --config webpack.config.ts",
+    "prepublishOnly": "npm run build",
+    "prepare": "is-ci || husky install"
+  },
   "devDependencies": {
-    "@commitlint/cli": "^8.2.0",
-    "@commitlint/config-conventional": "^8.2.0",
+    "@commitlint/cli": "^17.1.2",
+    "@commitlint/config-conventional": "^17.1.0",
+    "@jest/globals": "^29.3.1",
+    "@semantic-release/exec": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@types/chai-like": "^1.1.1",
+    "@types/chai-things": "^0.0.35",
     "@types/chalk": "^2.2.0",
-    "@types/har-format": "^1.2.4",
-    "@types/jest": "^23.3.1",
-    "@types/node": "~10.12.18",
-    "@typescript-eslint/eslint-plugin": "^2.7.0",
-    "@typescript-eslint/eslint-plugin-tslint": "^2.7.0",
-    "@typescript-eslint/parser": "^2.7.0",
-    "devtools-protocol": "0.0.719330",
-    "eslint": "^6.6.0",
-    "eslint-config-prettier": "^6.5.0",
-    "eslint-plugin-import": "^2.18.2",
-    "eslint-plugin-prefer-arrow": "^1.1.6",
-    "eslint-plugin-prettier": "^3.1.1",
-    "jest": "^25.0.0",
-    "lint-staged": "^9.4.1",
-    "nyc": "~14.1.1",
-    "prettier": "~1.19.1",
-    "semantic-release": "^15.13.27",
-    "ts-jest": "^23.1.3",
-    "ts-node": "~8.4.1",
-    "tsconfig-paths": "^3.9.0",
-    "tslint": "~5.20.1",
-    "tslint-plugin-prettier": "~2.0.1",
-    "typescript": "~3.7.2"
+    "@types/express": "^4.17.15",
+    "@types/har-format": "^1.2.8",
+    "@types/jest": "^29.2.4",
+    "@types/node": "~18.15.1",
+    "@types/webpack": "^5.28.0",
+    "@types/webpack-node-externals": "^2.5.3",
+    "@types/ws": "^8.5.4",
+    "@typescript-eslint/eslint-plugin": "^5.36.2",
+    "@typescript-eslint/parser": "^5.36.2",
+    "chai-like": "^1.1.1",
+    "chai-things": "^0.2.0",
+    "cypress": "^12.3.0",
+    "devtools-protocol": "~0.0.1040073",
+    "eslint": "^8.23.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-import-resolver-typescript": "^3.5.1",
+    "eslint-plugin-import": "^2.26.0",
+    "eslint-plugin-prettier": "^4.2.1",
+    "express": "^4.18.2",
+    "filemanager-webpack-plugin": "^7.0.0",
+    "hbs": "^4.2.0",
+    "husky": "^8.0.1",
+    "is-ci": "^3.0.1",
+    "jest": "^28.1.3",
+    "lint-staged": "^13.0.3",
+    "minimist": "^1.2.7",
+    "prettier": "~2.8.4",
+    "semantic-release": "^19.0.5",
+    "ts-jest": "^28.0.8",
+    "ts-loader": "^9.3.1",
+    "ts-mockito": "^2.6.1",
+    "ts-node": "~10.9.1",
+    "tsconfig-paths": "^4.1.0",
+    "typescript": "~4.8.2",
+    "webpack": "^5.74.0",
+    "webpack-cli": "^4.10.0",
+    "webpack-node-externals": "^3.0.0",
+    "ws": "^8.12.0"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "echo"
+    ],
+    "*.{ts,js,json,md}": [
+      "echo"
+    ]
+  },
+  "peerDependencies": {
+    "cypress": ">=4.4.1"
   },
   "dependencies": {
-    "tslib": "^1.10.0",
-    "chalk": "^3.0.0",
-    "chrome-remote-interface": "^0.28.0"
+    "chalk": "^4.1.2",
+    "chrome-remote-interface": "~0.32.1",
+    "tslib": "^2.4.0"
   }
 }

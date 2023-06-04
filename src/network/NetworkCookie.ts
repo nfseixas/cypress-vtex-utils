@@ -1,24 +1,21 @@
-enum CookieAttribute {
-  Name = 'name',
-  Value = 'value',
-  Size = 'size',
-  Domain = 'domain',
-  Port = 'port',
-  Path = 'path',
-  Expires = 'expires',
-  HttpOnly = 'httponly',
-  Secure = 'secure',
-  SameSite = 'samesite',
-  MaxAge = 'max-age'
+export enum CookieAttribute {
+  NAME = 'name',
+  VALUE = 'value',
+  SIZE = 'size',
+  DOMAIN = 'domain',
+  PORT = 'port',
+  PATH = 'path',
+  EXPIRES = 'expires',
+  HTTPONLY = 'httponly',
+  SECURE = 'secure',
+  SAMESITE = 'samesite',
+  MAXAGE = 'max-age'
 }
 
 export class NetworkCookie {
   private readonly _name: string;
   private readonly _value: string;
-  private _attributes: Map<CookieAttribute, string> = new Map<
-    CookieAttribute,
-    string
-  >();
+  private _attributes = new Map<CookieAttribute, string | undefined>();
 
   private _size: number = 0;
 
@@ -39,44 +36,42 @@ export class NetworkCookie {
   }
 
   get httpOnly(): boolean {
-    return this._attributes.has(CookieAttribute.HttpOnly);
+    return this._attributes.has(CookieAttribute.HTTPONLY);
   }
 
   get secure(): boolean {
-    return this._attributes.has(CookieAttribute.Secure);
+    return this._attributes.has(CookieAttribute.SECURE);
   }
 
   get sameSite(): 'Strict' | 'Lax' | 'None' | undefined {
-    return this._attributes.get(CookieAttribute.SameSite) as any;
+    return this._attributes.get(CookieAttribute.SAMESITE) as any;
   }
 
   get session(): boolean | undefined {
     return !(
-      this._attributes.has(CookieAttribute.Expires) ||
-      this._attributes.has(CookieAttribute.MaxAge)
+      this._attributes.has(CookieAttribute.EXPIRES) ||
+      this._attributes.has(CookieAttribute.MAXAGE)
     );
   }
 
   get path(): string | undefined {
-    return this._attributes.get(CookieAttribute.Path);
+    return this._attributes.get(CookieAttribute.PATH);
   }
 
   get port(): string | undefined {
-    return this._attributes.get(CookieAttribute.Port);
+    return this._attributes.get(CookieAttribute.PORT);
   }
 
   get domain(): string | undefined {
-    return this._attributes.get(CookieAttribute.Domain);
+    return this._attributes.get(CookieAttribute.DOMAIN);
   }
 
-  get expires(): string {
-    return this._attributes.get(CookieAttribute.Expires);
+  get expires(): string | undefined {
+    return this._attributes.get(CookieAttribute.EXPIRES);
   }
 
-  get maxAge(): number {
-    const maxAge: string | undefined = this._attributes.get(
-      CookieAttribute.MaxAge
-    );
+  get maxAge(): number | undefined {
+    const maxAge: string = this._attributes.get(CookieAttribute.MAXAGE) ?? '';
 
     return isNaN(+maxAge) ? undefined : +maxAge;
   }
@@ -101,10 +96,10 @@ export class NetworkCookie {
       return new Date(this.expires);
     }
 
-    return;
+    return undefined;
   }
 
-  public addAttribute(key: string, value: string): void {
-    this._attributes[key.toLowerCase()] = value;
+  public addAttribute(key: string, value?: string): void {
+    this._attributes.set(key.toLowerCase() as CookieAttribute, value);
   }
 }

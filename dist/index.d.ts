@@ -1,16 +1,31 @@
-/// <reference types="cypress" />
-import { PluginOptions } from './PluginOptions';
-declare type CypressInstallationCallback = (browser: Cypress.Browser, args: string[]) => Promise<string[]> | string[];
-interface CypressTasks {
-    saveHar(options: PluginOptions): Promise<void>;
-    recordHarConsole(options: PluginOptions): Promise<void>;
-    removeHar(options: PluginOptions): Promise<void>;
-    removeConsole(options: PluginOptions): Promise<void>;
-    saveConsole(options: PluginOptions): Promise<void>;
+import type { RecordOptions, SaveOptions } from './Plugin';
+declare global {
+    namespace Cypress {
+        interface Chainable<Subject> {
+            saveHar(options?: Partial<SaveOptions>): Chainable<Subject>;
+            recordHar(options?: Partial<RecordOptions>): Chainable<Subject>;
+            disposeOfHar(): Chainable<Subject>;
+            recordHarConsole(options?: Partial<RecordOptions>): Chainable<Subject>;
+            removeConsole(): Chainable<Subject>;
+            saveConsole(options?: Partial<SaveOptions>): Chainable<Subject>;
+        }
+    }
 }
-declare type InstallationArg = CypressInstallationCallback | CypressTasks;
-declare type CypressPluginEvent = 'before:browser:launch' | 'task';
-declare type CypressCallback = (event: CypressPluginEvent, arg?: InstallationArg) => void;
-export declare function install(on: CypressCallback, config: Cypress.ConfigOptions): void;
-export declare function ensureRequiredBrowserFlags(browser: Cypress.Browser, args: string[]): string[];
-export {};
+export declare const install: (on: Cypress.PluginEvents) => void;
+export declare const enableExperimentalLifecycle: (on: Cypress.PluginEvents, config: Cypress.PluginConfigOptions) => void;
+/**
+ * Function has been deprecated. Use {@link install} instead as follows:
+ * ```diff
+ * setupNodeEvents(on) {
+ *   install(on);
+ * -  // bind to the event we care about
+ * -  on('before:browser:launch', (browser = {}, launchOptions) => {
+ * -    ensureBrowserFlags(browser, launchOptions);
+ * -    return launchOptions;
+ * -  });
+ * }
+ * ```
+ * In case of any issues please refer to {@link https://github.com/cypress-io/cypress/issues/5240}
+ */
+export declare const ensureBrowserFlags: (browser: Cypress.Browser, launchOptions: Cypress.BrowserLaunchOptions) => void;
+export type { SaveOptions, RecordOptions } from './Plugin';

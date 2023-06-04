@@ -11,17 +11,10 @@ export class CookieParser {
   private _originalInputLength?: number;
   private _lastCookie?: NetworkCookie;
   private _lastCookiePosition: number = 0;
-
-  private _cookies: NetworkCookie[];
-
-  get cookies(): NetworkCookie[] {
-    return this._cookies;
-  }
+  private _cookies?: NetworkCookie[];
 
   public parseCookie(cookieHeader: string): NetworkCookie[] | undefined {
-    if (!this._initialize(cookieHeader)) {
-      return;
-    }
+    this._initialize(cookieHeader);
 
     for (let kv = this._extractKeyValue(); kv; kv = this._extractKeyValue()) {
       if (kv.key.charAt(0) === '$' && this._lastCookie) {
@@ -42,9 +35,7 @@ export class CookieParser {
   }
 
   public parseSetCookie(setCookieHeader: string): NetworkCookie[] | undefined {
-    if (!this._initialize(setCookieHeader)) {
-      return;
-    }
+    this._initialize(setCookieHeader);
 
     for (let kv = this._extractKeyValue(); kv; kv = this._extractKeyValue()) {
       if (this._lastCookie) {
@@ -61,32 +52,32 @@ export class CookieParser {
     return this._cookies;
   }
 
-  private _initialize(headerValue: string): boolean {
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  private _initialize(headerValue: string): void {
     this._input = headerValue;
-    if (typeof headerValue !== 'string') {
-      return false;
-    }
     this._cookies = [];
-    this._lastCookie = null;
+    this._lastCookie = undefined;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     this._originalInputLength = this._input.length;
-
-    return true;
   }
 
   private flushCookie(): void {
     if (this._lastCookie) {
+      /* eslint-disable @typescript-eslint/no-non-null-assertion */
       this._lastCookie.size =
-        this._originalInputLength -
-        this._input.length -
+        this._originalInputLength! -
+        this._input!.length -
         this._lastCookiePosition;
+      /* eslint-enable @typescript-eslint/no-non-null-assertion */
     }
 
     delete this._lastCookie;
   }
 
-  private _extractKeyValue(): KeyValue {
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  private _extractKeyValue(): KeyValue | undefined {
     if (!this._input?.length) {
-      return;
+      return undefined;
     }
 
     // Note: RFCs offer an option for quoted values that may contain commas and semicolons.
@@ -99,13 +90,14 @@ export class CookieParser {
     );
 
     if (!keyValueMatch) {
-      return;
+      return undefined;
     }
 
     const result: KeyValue = {
       key: this.toCamelCase(keyValueMatch[1]),
       value: keyValueMatch[2]?.trim(),
-      position: this._originalInputLength - this._input.length
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      position: this._originalInputLength! - this._input.length
     };
 
     this._input = this._input.slice(keyValueMatch[0].length);
@@ -115,19 +107,21 @@ export class CookieParser {
 
   private toCamelCase(str: string): string {
     return str
-      .replace(/\s(.)/g, ($1: string) => $1.toUpperCase())
+      .replace(/\s(.)/g, (m: string): string => m.toUpperCase())
       .replace(/\s/g, '')
-      .replace(/^(.)/, ($1: string) => $1.toLowerCase());
+      .replace(/^(.)/, (m: string): string => m.toLowerCase());
   }
 
   private advanceAndCheckCookieDelimiter(): boolean {
-    const match: RegExpExecArray | undefined = /^\s*[\n;]\s*/.exec(this._input);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const match: RegExpExecArray | null = /^\s*[\n;]\s*/.exec(this._input!);
 
     if (!match) {
       return false;
     }
 
-    this._input = this._input.slice(match[0].length);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    this._input = this._input!.slice(match[0].length);
 
     return match[0].match('\n') !== null;
   }
@@ -143,6 +137,7 @@ export class CookieParser {
         : new NetworkCookie('', keyValue.key);
 
     this._lastCookiePosition = keyValue.position;
-    this._cookies.push(this._lastCookie);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    this._cookies!.push(this._lastCookie);
   }
 }

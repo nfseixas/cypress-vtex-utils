@@ -1,51 +1,55 @@
-/// <reference types="node" />
-import Protocol from 'devtools-protocol';
-import { UrlWithStringQuery } from 'url';
-import { Header, Param, QueryString } from 'har-format';
-import { Network } from 'chrome-remote-interface';
 import { NetworkCookie } from './NetworkCookie';
+import type { RequestExtraInfo, ResponseExtraInfo } from './ExtraInfoBuilder';
+import type { Header, Param, QueryString } from 'har-format';
+import type Protocol from 'devtools-protocol';
 export interface ContentData {
     error?: string;
     text?: string;
     encoding?: string;
 }
 export declare enum WebSocketFrameType {
-    Request = "request",
-    Response = "response",
-    Error = "error"
+    REQUEST = "request",
+    RESPONSE = "response",
+    ERROR = "error"
 }
 export interface WebSocket {
     type: WebSocketFrameType;
     data: string;
     time: Protocol.Network.MonotonicTime;
-    opCode: number;
+    opcode: number;
     mask: boolean;
+}
+export interface EventSourceMessage {
+    time: number;
+    eventName: string;
+    eventId: string;
+    data: string;
 }
 export declare class NetworkRequest {
     private _requestId;
     readonly documentURL: string;
-    readonly frameId: Protocol.Page.FrameId;
     readonly loaderId: Protocol.Network.LoaderId;
-    readonly initiator: Protocol.Network.Initiator;
-    private readonly network;
+    readonly initiator?: Protocol.Network.Initiator | undefined;
+    readonly frameId: Protocol.Page.FrameId;
     private _contentData?;
     private _wallIssueTime;
     private _requestHeaderValues;
     private _responseHeaderValues;
     private _parsedQueryParameters?;
     private _currentPriority?;
-    private _requestFormDataPromise;
+    private _requestFormData;
     private _formParametersPromise?;
     private _signedExchangeInfo?;
-    set signedExchangeInfo(info: Protocol.Network.SignedExchangeInfo);
+    get signedExchangeInfo(): Protocol.Network.SignedExchangeInfo | undefined;
+    set signedExchangeInfo(info: Protocol.Network.SignedExchangeInfo | undefined);
     private _hasExtraResponseInfo;
     get hasExtraResponseInfo(): boolean;
     set hasExtraResponseInfo(value: boolean);
     private _hasExtraRequestInfo;
     get hasExtraRequestInfo(): boolean;
     set hasExtraRequestInfo(value: boolean);
-    private _connectionId?;
-    get connectionId(): string | undefined;
+    private _connectionId;
+    get connectionId(): string;
     set connectionId(value: string);
     private _protocol;
     get protocol(): string;
@@ -59,10 +63,11 @@ export declare class NetworkRequest {
     private _statusText;
     get statusText(): string;
     set statusText(value: string);
-    private _parsedURL?;
-    get parsedURL(): UrlWithStringQuery;
-    private _url?;
-    get url(): string | undefined;
+    private _parsedURL;
+    get parsedURL(): URL;
+    private _url;
+    get url(): string;
+    set url(value: string);
     private _remoteAddress;
     get remoteAddress(): string;
     private _startTime;
@@ -83,16 +88,16 @@ export declare class NetworkRequest {
     set transferSize(value: number);
     private _timing?;
     get timing(): Protocol.Network.ResourceTiming | undefined;
-    set timing(timingInfo: Protocol.Network.ResourceTiming);
+    set timing(timingInfo: Protocol.Network.ResourceTiming | undefined);
     private _mimeType?;
     get mimeType(): string | undefined;
-    set mimeType(value: string);
+    set mimeType(value: string | undefined);
     private _resourceType;
     get resourceType(): Protocol.Network.ResourceType;
     set resourceType(resourceType: Protocol.Network.ResourceType);
     private _redirectSource?;
     get redirectSource(): NetworkRequest | undefined;
-    set redirectSource(originatingRequest: NetworkRequest);
+    set redirectSource(originatingRequest: NetworkRequest | undefined);
     private _requestHeaders;
     get requestHeaders(): Header[];
     set requestHeaders(headers: Header[]);
@@ -114,10 +119,12 @@ export declare class NetworkRequest {
     private _responseCookies?;
     get responseCookies(): NetworkCookie[] | undefined;
     private _queryString?;
-    get queryString(): string;
+    get queryString(): string | undefined;
     private _initialPriority?;
     get initialPriority(): Protocol.Network.ResourcePriority | undefined;
-    set initialPriority(priority: Protocol.Network.ResourcePriority);
+    set initialPriority(priority: Protocol.Network.ResourcePriority | undefined);
+    private _eventSourceMessages;
+    get eventSourceMessages(): EventSourceMessage[];
     private _frames;
     get frames(): WebSocket[];
     private _statusCode;
@@ -126,33 +133,30 @@ export declare class NetworkRequest {
     get requestId(): Protocol.Network.RequestId;
     get requestHttpVersion(): string;
     get queryParameters(): QueryString[] | undefined;
-    get requestContentType(): string;
+    get requestContentType(): string | undefined;
     get priority(): Protocol.Network.ResourcePriority | undefined;
-    set priority(priority: Protocol.Network.ResourcePriority);
-    constructor(_requestId: Protocol.Network.RequestId, url: string, documentURL: string, frameId: Protocol.Page.FrameId, loaderId: Protocol.Network.LoaderId, initiator: Protocol.Network.Initiator, network: Network);
-    private static escapeCharacters;
-    setUrl(value: string): void;
+    set priority(priority: Protocol.Network.ResourcePriority | undefined);
+    constructor(_requestId: Protocol.Network.RequestId, url: string, documentURL: string, loaderId: Protocol.Network.LoaderId, initiator?: Protocol.Network.Initiator | undefined, frameId?: Protocol.Page.FrameId);
+    waitForCompletion(): Promise<void>;
+    isBlob(): boolean;
     setRemoteAddress(ip: string, port: number): void;
     setIssueTime(monotonicTime: Protocol.Network.MonotonicTime, wallTime: Protocol.Network.TimeSinceEpoch): void;
     increaseTransferSize(value: number): void;
     requestFormData(): Promise<string | undefined>;
-    setRequestFormData(hasData: boolean, data: string): void;
-    _parseFormParameters(): Promise<Param[]>;
+    setRequestFormData(data: string | Promise<string | undefined>): void;
     getWallTime(monotonicTime: Protocol.Network.MonotonicTime): number;
     formParameters(): Promise<Param[]>;
     responseHttpVersion(): string;
-    contentData(): Promise<ContentData>;
+    setContentData(data: Promise<Protocol.Network.GetResponseBodyResponse>): void;
+    contentData(): Promise<ContentData> | undefined;
     addProtocolFrameError(errorMessage: string, time: Protocol.Network.MonotonicTime): void;
     addProtocolFrame(response: Protocol.Network.WebSocketFrame, time: Protocol.Network.MonotonicTime, sent: boolean): void;
+    addEventSourceMessage(time: number, eventName: string, eventId: string, data: string): void;
     markAsRedirect(redirectCount: number): void;
-    addExtraRequestInfo(extraRequestInfo: {
-        requestHeaders: Header[];
-    }): void;
-    addExtraResponseInfo(extraResponseInfo: {
-        responseHeaders: Header[];
-        responseHeadersText: string;
-    }): void;
+    addExtraRequestInfo(extraRequestInfo: RequestExtraInfo): void;
+    addExtraResponseInfo(extraResponseInfo: ResponseExtraInfo): void;
     responseHeaderValue(headerName: string): string | undefined;
+    private parseFormParameters;
     private parseMultipartFormDataParameters;
     private addFrame;
     private requestHeaderValue;

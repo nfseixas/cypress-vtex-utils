@@ -1,4 +1,10 @@
-tmp
-node_modules
-**/*.spec.ts
-**/*.js
+# Add files here to ignore them from eslint
+
+**/.*
+/tmp
+/dist
+/coverage
+/example
+/node_modules
+*-lock.json
+*.lock

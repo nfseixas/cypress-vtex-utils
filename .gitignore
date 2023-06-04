@@ -1,28 +1,44 @@
-.idea
-.vscode
-*.iml
+# See http://help.github.com/ignore-files/ for more about ignoring files.
 
-logs
-*.har
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# compiled output
+/dist
+/tmp
+/out-tsc
+commands.js
 
-pids
-*.pid
-*.seed
-*.pid.lock
+# dependencies
+/node_modules
 
-lib-cov
-coverage
-.nyc_output
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
 
-node_modules
-jspm_packages
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 
-.npm
-.eslintcache
+# misc
+/.sass-cache
+/connect.lock
+/.coverage
+/coverage
+/.nyc_output
+/libpeerconnection.log
+npm-debug.log
+yarn-error.log
+testem.log
 
+# System Files
+.DS_Store
+Thumbs.db
+
+# Config Files
 .env
-.cache

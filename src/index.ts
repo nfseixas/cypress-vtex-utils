@@ -1,61 +1,131 @@
 import { Plugin } from './Plugin';
-import { Logger } from './utils';
-import { PluginOptions } from './PluginOptions';
+import { Logger } from './utils/Logger';
+import { FileManager } from './utils/FileManager';
+import { DefaultConnectionFactory } from './cdp';
+import { DefaultHarExporterFactory, DefaultObserverFactory } from './network';
+import { StringUtils } from './utils/StringUtils';
+import type { RecordOptions, SaveOptions } from './Plugin';
 
-type CypressInstallationCallback = (
-  browser: Cypress.Browser,
-  args: string[]
-) => Promise<string[]> | string[];
-
-interface CypressTasks {
-  saveHar(options: PluginOptions): Promise<void>;
-  recordHarConsole(options: PluginOptions): Promise<void>;
-  removeHar(options: PluginOptions): Promise<void>;
-  removeConsole(options: PluginOptions): Promise<void>;
-  saveConsole(options: PluginOptions): Promise<void>;
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Cypress {
+    interface Chainable<Subject> {
+      saveHar(options?: Partial<SaveOptions>): Chainable<Subject>;
+      recordHar(options?: Partial<RecordOptions>): Chainable<Subject>;
+      disposeOfHar(): Chainable<Subject>;
+      recordHarConsole(options?: Partial<RecordOptions>): Chainable<Subject>;
+      removeConsole(): Chainable<Subject>;
+      saveConsole(options?: Partial<SaveOptions>): Chainable<Subject>;
+    }
+  }
 }
 
-type InstallationArg = CypressInstallationCallback | CypressTasks;
+const plugin = new Plugin(
+  Logger.Instance,
+  FileManager.Instance,
+  new DefaultConnectionFactory(Logger.Instance),
+  new DefaultObserverFactory(Logger.Instance),
+  new DefaultHarExporterFactory(FileManager.Instance, Logger.Instance)
+);
 
-type CypressPluginEvent = 'before:browser:launch' | 'task';
+export const install = (on: Cypress.PluginEvents): void => {
+  // ADHOC: Cypress expect the return value to be null to signal that the given event has been handled properly.
+  // https://docs.cypress.io/api/commands/task#Usage
+  on('task', {
+    saveHar: async (options: SaveOptions): Promise<null> => {
+      await plugin.saveHar(options);
 
-type CypressCallback = (
-  event: CypressPluginEvent,
-  arg?: InstallationArg
-) => void;
+      return null;
+    },
+    recordHar: async (options: RecordOptions): Promise<null> => {
+      await plugin.recordHar(options);
 
-const DEFAULT_OPTIONS: PluginOptions = {
-  file: './NetworkRequest.har',
-  stubPath: '/__cypress/xhrs/'
+      return null;
+    },
+    disposeOfHar: async (): Promise<null> => {
+      await plugin.disposeOfHar();
+
+      return null;
+    },
+
+    recordHarConsole: async (options: RecordOptions): Promise<null> => {
+      await plugin.recordHarConsole(options);
+
+      return null;
+    },
+
+    removeConsole: async (options: SaveOptions): Promise<null> => {
+      await plugin.removeConsole(options);
+
+      return null;
+    },
+    saveConsole: async (options: SaveOptions): Promise<null> => {
+      await plugin.saveConsole(options);
+
+      return null;
+    },
+  });
+
+  on(
+    'before:browser:launch',
+    (
+      browser: Cypress.Browser | null,
+      launchOptions: Cypress.BrowserLaunchOptions
+    ) => {
+      ensureBrowserFlags((browser ?? {}) as Cypress.Browser, launchOptions);
+
+      return launchOptions;
+    }
+  );
 };
 
-const plugin: Plugin = new Plugin(Logger.Instance, DEFAULT_OPTIONS);
+export const enableExperimentalLifecycle = (
+  on: Cypress.PluginEvents,
+  config: Cypress.PluginConfigOptions
+) => {
+  // FIXME: `isInteractive` is always true. For details see https://github.com/cypress-io/cypress/issues/20789
+  if (!config.isTextTerminal && !config.experimentalInteractiveRunEvents) {
+    Logger.Instance.warn(
+      'To activate the experimental mechanism for setting up lifecycle, you must either disable the interactive mode or activate the "experimentalInteractiveRunEvents" feature. For further information, please refer to: https://docs.cypress.io/guides/references/experiments#Configuration'
+    );
+  } else {
+    on('before:spec', (_: Cypress.Spec) =>
+      plugin.recordHar({
+        content: true,
+        includeBlobs: true,
+        rootDir: StringUtils.dirname(Cypress.spec.absolute)
+      })
+    );
+    on('after:spec', (spec: Cypress.Spec, _: CypressCommandLine.RunResult) =>
+      plugin.saveHar({
+        fileName: StringUtils.normalizeName(spec.name, { ext: '.har' }),
+        outDir: config.env.hars_folders ?? '.'
+      })
+    );
+  }
+};
 
-export function install(
-  on: CypressCallback,
-  config: Cypress.ConfigOptions
-): void {
-  const env: { [key: string]: any } = config?.env ?? {};
-
-  const pluginOptions: PluginOptions = {
-    file: env?.HAR_FILE ?? DEFAULT_OPTIONS.file,
-    stubPath: env?.STUB_PATH ?? DEFAULT_OPTIONS.stubPath
-  };
-
-  plugin.configure(pluginOptions);
-
-  on('task', {
-    saveHar: (): Promise<void> => plugin.saveHar(),
-    recordHarConsole: (): Promise<void> => plugin.recordHarConsole(),
-    removeHar: (): Promise<void> => plugin.removeHar(),
-    removeConsole: (): Promise<void> => plugin.removeConsole(),
-    saveConsole: (): Promise<void> => plugin.saveConsole()
-  });
-}
-
-export function ensureRequiredBrowserFlags(
+/**
+ * Function has been deprecated. Use {@link install} instead as follows:
+ * ```diff
+ * setupNodeEvents(on) {
+ *   install(on);
+ * -  // bind to the event we care about
+ * -  on('before:browser:launch', (browser = {}, launchOptions) => {
+ * -    ensureBrowserFlags(browser, launchOptions);
+ * -    return launchOptions;
+ * -  });
+ * }
+ * ```
+ * In case of any issues please refer to {@link https://github.com/cypress-io/cypress/issues/5240}
+ */
+export const ensureBrowserFlags = (
   browser: Cypress.Browser,
-  args: string[]
-): string[] {
-  return plugin.ensureRequiredBrowserFlags(browser, args);
-}
+  launchOptions: Cypress.BrowserLaunchOptions
+): void => {
+  launchOptions.args.push(
+    ...plugin.ensureBrowserFlags(browser, launchOptions.args)
+  );
+};
+
+export type { SaveOptions, RecordOptions } from './Plugin';
